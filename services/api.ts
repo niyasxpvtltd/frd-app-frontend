@@ -23,7 +23,7 @@ export const apiService = {
     return apiClient.post<AuthResponse>('/auth/signup', payload);
   },
 
-  // Create user profile (name, gender, dob)
+  // Create or update user profile (name, gender, dob, bio)
   async createProfile(
     payload: { fullName: string; gender: string; dob: string; bio?: string; location?: string },
     token: string
@@ -31,8 +31,13 @@ export const apiService = {
     return apiClient.post('/user/profile', payload, { token });
   },
 
-  // Get user profile
+  // Get auth status & user profile
   async getMe(token: string): Promise<ApiResponse<any>> {
     return apiClient.get('/auth/me', { token });
+  },
+
+  // Get user profile directly
+  async getMyProfile(token: string): Promise<ApiResponse<any>> {
+    return apiClient.get('/user/profile', { token });
   },
 };

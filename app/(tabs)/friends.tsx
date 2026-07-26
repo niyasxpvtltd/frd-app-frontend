@@ -1,11 +1,21 @@
 import React from 'react';
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, Image, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, SafeAreaView, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function FriendsScreen() {
+  const insets = useSafeAreaInsets();
+  const topPadding = insets.top > 0 ? insets.top : (Platform.OS === 'android' ? RNStatusBar.currentHeight || 24 : 10);
+  const bottomPadding = (insets.bottom > 0 ? insets.bottom : 10) + 70;
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <RNStatusBar barStyle="light-content" backgroundColor="#FF4B72" translucent />
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, { paddingTop: topPadding, paddingBottom: bottomPadding }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <Text style={styles.title}>Friends & Vibe</Text>
           <Text style={styles.subtitle}>Your Connections & Groups</Text>
@@ -24,8 +34,8 @@ export default function FriendsScreen() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#FFFFFF' },
   container: { flex: 1, backgroundColor: '#FFFFFF' },
-  content: { padding: 20 },
-  header: { marginBottom: 20 },
+  content: { paddingHorizontal: 20 },
+  header: { marginBottom: 20, marginTop: 10 },
   title: { fontSize: 28, fontWeight: '800', color: '#0F172A' },
   subtitle: { fontSize: 14, color: '#64748B', marginTop: 4 },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },

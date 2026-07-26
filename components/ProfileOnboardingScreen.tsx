@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,14 +7,15 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   ActivityIndicator,
   StatusBar as RNStatusBar,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { apiService } from '@/services/api';
 import { storage } from '@/services/storage';
 
@@ -32,14 +33,106 @@ export default function ProfileOnboardingScreen() {
   const [fullName, setFullName] = useState('');
   const [selectedGender, setSelectedGender] = useState('Female');
   const [dob, setDob] = useState('');
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date(2000, 0, 1));
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [bio, setBio] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
 
   // Status & Feedback
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadExistingProfile();
+  }, []);
+
+  const formatDateString = (dateObj: Date): string => {
+    const yyyy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dateObj.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const applyProfileData = (rootObj: any): boolean => {
+    if (!rootObj) return false;
+
+    const candidates = [
+      rootObj.profile,
+      rootObj.data?.profile,
+      rootObj.data,
+      rootObj.user,
+      rootObj,
+    ];
+
+    for (const c of candidates) {
+      if (!c) continue;
+      const name = c.fullName || c.full_name || c.name;
+      const gender = c.gender;
+      const dobVal = c.dob || c.date_of_birth || c.dateOfBirth;
+      const bioVal = c.bio;
+
+      if (name || gender || dobVal || bioVal) {
+        setIsEditing(true);
+        if (name) setFullName(String(name));
+        if (gender) setSelectedGender(String(gender));
+        if (dobVal) {
+          setDob(String(dobVal));
+          const parsed = new Date(String(dobVal));
+          if (!isNaN(parsed.getTime())) {
+            setSelectedDate(parsed);
+          }
+        }
+        if (bioVal) setBio(String(bioVal));
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const loadExistingProfile = async () => {
+    try {
+      setIsLoading(true);
+
+      // 1. Instant pre-fill from local secure storage
+      const userData = await storage.getUser();
+      if (userData) {
+        applyProfileData(userData);
+      }
+
+      // 2. Fetch fresh profile data from backend API
+      const token = await storage.getToken();
+      if (token) {
+        const profileRes = await apiService.getMyProfile(token);
+        if (profileRes.success && profileRes.data) {
+          applyProfileData(profileRes.data);
+        } else {
+          const meRes = await apiService.getMe(token);
+          if (meRes.success && meRes.data) {
+            applyProfileData(meRes.data);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[PROFILE] Error loading profile:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDateChange = (event: any, date?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    if (date) {
+      setSelectedDate(date);
+      setDob(formatDateString(date));
+    }
+  };
 
   const handleContinue = async () => {
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     if (!fullName.trim()) {
       setErrorMessage('Please enter your full name.');
@@ -52,7 +145,7 @@ export default function ProfileOnboardingScreen() {
     }
 
     if (!dob.trim()) {
-      setErrorMessage('Please enter your Date of Birth (DOB).');
+      setErrorMessage('Please select your Date of Birth (DOB).');
       return;
     }
 
@@ -80,16 +173,26 @@ export default function ProfileOnboardingScreen() {
       setIsLoading(false);
 
       if (res.success) {
-        // Save profile to secure storage
+        setSuccessMessage(isEditing ? 'Profile updated successfully!' : 'Profile saved successfully!');
+
+        const updatedProfile = {
+          fullName: fullName.trim(),
+          gender: selectedGender,
+          dob: dob.trim(),
+          bio: bio.trim(),
+        };
+
         const currentUser = (await storage.getUser()) || {};
         await storage.saveUser({
           ...currentUser,
           hasProfile: true,
-          profile: res.data,
+          profile: updatedProfile,
+          ...updatedProfile,
         });
 
-        // Navigate to main dashboard
-        router.replace('/(tabs)');
+        setTimeout(() => {
+          router.replace('/(tabs)');
+        }, 800);
       } else {
         setErrorMessage(res.message || 'Failed to save profile details.');
       }
@@ -106,11 +209,15 @@ export default function ProfileOnboardingScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.container}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+        <View style={styles.mainScreenContainer}>
+          {/* Top Bar with Back Button */}
+          <View style={styles.topNavRow}>
+            <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={styles.backBtn}>
+              <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
+              <Text style={styles.backBtnText}>Dashboard</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Header */}
           <View style={styles.headerContainer}>
             <LinearGradient
@@ -119,11 +226,13 @@ export default function ProfileOnboardingScreen() {
               end={{ x: 1, y: 1 }}
               style={styles.iconBadge}
             >
-              <Ionicons name="person-add" size={28} color="#FFFFFF" />
+              <Ionicons name={isEditing ? 'create-outline' : 'person-add'} size={24} color="#FFFFFF" />
             </LinearGradient>
-            <Text style={styles.title}>Complete Your Profile</Text>
+            <Text style={styles.title}>{isEditing ? 'Edit Profile' : 'Complete Profile'}</Text>
             <Text style={styles.subtitle}>
-              Tell us a bit about yourself to find your best matches on FRD.
+              {isEditing
+                ? 'Update your personal details & preferences.'
+                : 'Tell us a bit about yourself to find your best matches.'}
             </Text>
           </View>
 
@@ -131,8 +240,15 @@ export default function ProfileOnboardingScreen() {
           <View style={styles.cardContainer}>
             {errorMessage ? (
               <View style={styles.errorBox}>
-                <Ionicons name="alert-circle" size={18} color="#FF6B6B" />
+                <Ionicons name="alert-circle" size={16} color="#FF6B6B" />
                 <Text style={styles.errorText}>{errorMessage}</Text>
+              </View>
+            ) : null}
+
+            {successMessage ? (
+              <View style={styles.successBox}>
+                <Ionicons name="checkmark-circle" size={16} color="#4ADE80" />
+                <Text style={styles.successText}>{successMessage}</Text>
               </View>
             ) : null}
 
@@ -140,7 +256,7 @@ export default function ProfileOnboardingScreen() {
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>Full Name *</Text>
               <View style={styles.inputWrapper}>
-                <Ionicons name="person-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
+                <Ionicons name="person-outline" size={18} color="#94A3B8" style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="e.g. Alex Morgan"
@@ -167,7 +283,7 @@ export default function ProfileOnboardingScreen() {
                     >
                       <Ionicons
                         name={g.icon as any}
-                        size={18}
+                        size={16}
                         color={isSelected ? '#FFFFFF' : '#94A3B8'}
                       />
                       <Text style={[styles.genderText, isSelected && styles.genderTextSelected]}>
@@ -179,33 +295,31 @@ export default function ProfileOnboardingScreen() {
               </View>
             </View>
 
-            {/* Date of Birth */}
+            {/* Date of Birth Picker Button */}
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>Date of Birth (DOB) *</Text>
-              <View style={styles.inputWrapper}>
-                <Ionicons name="calendar-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="YYYY-MM-DD or MM/DD/YYYY"
-                  placeholderTextColor="#64748B"
-                  value={dob}
-                  onChangeText={setDob}
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
+              <TouchableOpacity
+                style={styles.inputWrapper}
+                onPress={() => setShowDatePicker(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="calendar" size={18} color="#FF4B72" style={styles.inputIcon} />
+                <Text style={[styles.textInput, { paddingTop: 12, color: dob ? '#FFFFFF' : '#64748B' }]}>
+                  {dob || 'Select Date of Birth'}
+                </Text>
+                <Ionicons name="chevron-down-outline" size={18} color="#94A3B8" />
+              </TouchableOpacity>
             </View>
 
             {/* Bio (Optional) */}
             <View style={styles.fieldContainer}>
               <Text style={styles.fieldLabel}>Bio (Optional)</Text>
-              <View style={[styles.inputWrapper, { height: 80, alignItems: 'flex-start', paddingTop: 10 }]}>
-                <Ionicons name="document-text-outline" size={20} color="#94A3B8" style={styles.inputIcon} />
+              <View style={[styles.inputWrapper, { height: 52, alignItems: 'center' }]}>
+                <Ionicons name="document-text-outline" size={18} color="#94A3B8" style={styles.inputIcon} />
                 <TextInput
-                  style={[styles.textInput, { textAlignVertical: 'top' }]}
+                  style={styles.textInput}
                   placeholder="Share your vibe, hobbies, or interests..."
                   placeholderTextColor="#64748B"
-                  multiline
-                  numberOfLines={3}
                   value={bio}
                   onChangeText={setBio}
                 />
@@ -229,15 +343,56 @@ export default function ProfileOnboardingScreen() {
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
                   <View style={styles.submitBtnContent}>
-                    <Text style={styles.submitBtnText}>Continue to App</Text>
-                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                    <Text style={styles.submitBtnText}>
+                      {isEditing ? 'Save Changes' : 'Continue to App'}
+                    </Text>
+                    <Ionicons name="arrow-forward" size={16} color="#FFFFFF" style={{ marginLeft: 6 }} />
                   </View>
                 )}
               </LinearGradient>
             </TouchableOpacity>
           </View>
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
+
+      {/* DATE PICKER MODAL FOR IOS & WEB / ANDROID TRIGGER */}
+      {showDatePicker && (
+        Platform.OS === 'ios' ? (
+          <Modal transparent animationType="slide" visible={showDatePicker}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.datePickerContainer}>
+                <View style={styles.datePickerHeader}>
+                  <Text style={styles.datePickerTitle}>Select Date of Birth</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowDatePicker(false)}
+                    style={styles.doneBtn}
+                  >
+                    <Text style={styles.doneBtnText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={selectedDate}
+                  mode="date"
+                  display="spinner"
+                  maximumDate={new Date()}
+                  minimumDate={new Date(1950, 0, 1)}
+                  onChange={handleDateChange}
+                  textColor="#FFFFFF"
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          <DateTimePicker
+            value={selectedDate}
+            mode="date"
+            display="default"
+            maximumDate={new Date()}
+            minimumDate={new Date(1950, 0, 1)}
+            onChange={handleDateChange}
+          />
+        )
+      )}
     </SafeAreaView>
   );
 }
@@ -250,55 +405,70 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? 30 : 20,
-    paddingBottom: 40,
+  mainScreenContainer: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'android' ? 12 : 6,
+    paddingBottom: 16,
+    justifyContent: 'space-between',
+  },
+
+  topNavRow: {
+    marginBottom: 4,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  backBtnText: {
+    color: '#94A3B8',
+    fontSize: 13,
+    fontWeight: '600',
   },
 
   /* Header */
   headerContainer: {
     alignItems: 'center',
-    marginBottom: 24,
-    marginTop: 10,
+    marginBottom: 8,
   },
   iconBadge: {
-    width: 60,
-    height: 60,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 6,
     shadowColor: '#FF4B72',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   title: {
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '800',
     color: '#FFFFFF',
-    marginBottom: 6,
+    marginBottom: 2,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#94A3B8',
     textAlign: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
   },
 
   /* Card */
   cardContainer: {
     backgroundColor: '#161824',
-    borderRadius: 24,
-    padding: 20,
+    borderRadius: 20,
+    padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
     elevation: 6,
   },
 
@@ -308,54 +478,71 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 107, 107, 0.12)',
     borderWidth: 1,
     borderColor: 'rgba(255, 107, 107, 0.3)',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 16,
-    gap: 8,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+    gap: 6,
   },
   errorText: {
     color: '#FF6B6B',
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
+  },
+  successBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(74, 222, 128, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74, 222, 128, 0.3)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+    gap: 6,
+  },
+  successText: {
+    color: '#4ADE80',
+    fontSize: 12,
     fontWeight: '500',
     flex: 1,
   },
 
   /* Fields */
   fieldContainer: {
-    marginBottom: 18,
+    marginBottom: 10,
   },
   fieldLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: '#CBD5E1',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#1E2132',
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#2D3248',
-    paddingHorizontal: 14,
-    height: 50,
+    paddingHorizontal: 12,
+    height: 44,
   },
   inputIcon: {
-    marginRight: 10,
+    marginRight: 8,
   },
   textInput: {
     flex: 1,
     color: '#FFFFFF',
-    fontSize: 15,
-    height: '100%',
+    fontSize: 14,
   },
 
   /* Gender Grid */
   genderGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   genderChip: {
     width: '48%',
@@ -363,11 +550,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#1E2132',
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#2D3248',
-    paddingVertical: 12,
-    gap: 8,
+    paddingVertical: 9,
+    gap: 6,
   },
   genderChipSelected: {
     backgroundColor: '#FF4B72',
@@ -375,7 +562,7 @@ const styles = StyleSheet.create({
   },
   genderText: {
     color: '#94A3B8',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
   },
   genderTextSelected: {
@@ -383,19 +570,19 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  /* Continue Button */
+  /* Save Changes Button */
   submitBtnTouchable: {
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
-    marginTop: 10,
+    marginTop: 6,
     shadowColor: '#FF4B72',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   submitGradient: {
-    height: 52,
+    height: 46,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -406,8 +593,46 @@ const styles = StyleSheet.create({
   },
   submitBtnText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+
+  /* DATE PICKER MODAL STYLES */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  datePickerContainer: {
+    backgroundColor: '#161824',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 16,
+    borderTopWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  datePickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingHorizontal: 8,
+  },
+  datePickerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  doneBtn: {
+    backgroundColor: '#FF4B72',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  doneBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
 });

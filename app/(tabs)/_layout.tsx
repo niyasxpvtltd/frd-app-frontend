@@ -1,10 +1,17 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { StyleSheet, View, Text, Platform } from 'react-native';
+import { StyleSheet, View, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HapticTab } from '@/components/haptic-tab';
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+
+  // Dynamic bottom inset detection for iOS Home Indicator and Android System Navigation Bars
+  const bottomPadding = insets.bottom > 0 ? insets.bottom : 8;
+  const tabBarHeight = 56 + (insets.bottom > 0 ? insets.bottom : 10);
+
   return (
     <Tabs
       screenOptions={{
@@ -12,7 +19,13 @@ export default function TabLayout() {
         tabBarInactiveTintColor: '#94A3B8',
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [
+          styles.tabBar,
+          {
+            height: tabBarHeight,
+            paddingBottom: bottomPadding,
+          },
+        ],
         tabBarLabelStyle: styles.tabBarLabel,
       }}
     >
@@ -73,14 +86,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#F1F5F9',
-    height: Platform.OS === 'ios' ? 84 : 64,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
     paddingTop: 8,
     elevation: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.06,
     shadowRadius: 10,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   tabBarLabel: {
     fontSize: 12,
